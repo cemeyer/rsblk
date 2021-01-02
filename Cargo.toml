@@ -1,0 +1,16 @@
+[package]
+name = "rsblk"
+version = "0.1.0"
+authors = ["Conrad Meyer <cem@FreeBSD.org>"]
+edition = "2018"
+
+[dependencies]
+anyhow = "~1.0.37"
+freebsd-geom = { version = "~0.1.0" }
+ptree = { version = "~0.3.1", features = ["ansi"] }
+strum = "~0.20.0"
+strum_macros = "~0.20.1"
+tabwriter = { version = "~1.2.1", features = ["ansi_formatting"] }
+
+[profile.dev]
+opt-level = 2
