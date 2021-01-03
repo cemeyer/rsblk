@@ -1,7 +1,12 @@
 [package]
 name = "rsblk"
+description = "List block devices on FreeBSD"
 version = "0.1.0"
 authors = ["Conrad Meyer <cem@FreeBSD.org>"]
+license = "MIT"
+categories = ["command-line-utilities", "filesystem", "hardware-support", "value-formatting", "visualization"]
+keywords = ["freebsd", "geom", "cli", "terminal", "utility"]
+repository = "https://github.com/cemeyer/rsblk"
 edition = "2018"
 
 [dependencies]
