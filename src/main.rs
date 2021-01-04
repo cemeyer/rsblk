@@ -7,7 +7,7 @@ use freebsd_geom::{self as geom, GeomClass};
 use ptree::{self, print_config::PrintConfig, TreeBuilder};
 use std::{
     self,
-    default::Default,
+    cmp::Ordering,
     fmt::{self, Display, Formatter},
     io::Write,
     str::FromStr,
@@ -29,7 +29,9 @@ enum Col {
     #[strum(serialize = "LABEL")]
     Label,
     #[strum(serialize = "MOUNTPOINT")]
-    Mointpoint,
+    Mountpoint,
+    #[strum(serialize = "UUID")]
+    Uuid,
 }
 
 fn emit_header(w: &mut TabWriter<Vec<u8>>, cols: &Vec<Col>) -> Result<()> {
@@ -53,64 +55,79 @@ fn format_root(name: &str, ncols: usize) -> String {
     return format!("{}{}", name, pad);
 }
 
-fn format_datum(edge: &geom::Edge, node: &geom::Geom, col: &Col) -> String {
+fn format_datum(forest: &geom::Graph, edge: &geom::Edge, node: &geom::Geom, col: &Col) -> String {
     match col {
-        Col::Name => node.name.to_owned(),
+        Col::Name => edge.name.to_owned(),
         Col::Class => format!("{:?}", &node.class),
         Col::Size => format!("{}", edge.mediasize),
-        // XXX
+        Col::FsType => match &edge.metadata {
+            Some(edgemd) => match &**edgemd {
+                geom::EdgeMetadata::PART { type_: ptype, .. } => ptype.to_owned(),
+                _ => "".to_owned(),
+            },
+            _ => "".to_owned(),
+        },
+        Col::Label => match &edge.metadata {
+            Some(edgemd) => match &**edgemd {
+                geom::EdgeMetadata::PART { label: plabel, .. } => {
+                    plabel.as_deref().unwrap_or("").to_owned()
+                }
+                _ => "".to_owned(),
+            },
+            _ => "".to_owned(),
+        },
+        // Col::Mountpoint will require looking at the mountpoint list and maybe recursive search
+        // for SWAP geoms under any matching edge (e.g., label or dev child).
+        Col::Uuid => match &edge.metadata {
+            Some(edgemd) => match &**edgemd {
+                geom::EdgeMetadata::PART { rawuuid: uuid, .. } => {
+                    uuid.as_deref().unwrap_or("").to_owned()
+                }
+                _ => "".to_owned(),
+            },
+            _ => "".to_owned(),
+        },
+
+        // Not yet implemented:
         _ => "".to_owned(),
     }
 }
 
-#[derive(Copy, Clone, Debug, Default)]
-struct WalkState {
-    inpart: bool,
-    inlabel: bool,
-}
-
-// What do we actually want to find?
-// (1) PART node.  We don't print the PART table itself, but we know that *direct* DEV descendents
-//     are definitely things we want to print.
-// (2) *Canonical* DEV nodes as well as *alias* (LABEL) DEV nodes for the same device.  We need to
-//     check the mounttab for any name but will print the canonical name.  Probably.
 fn walk_geom(
     forest: &geom::Graph,
     nodeid: &geom::NodeId,
     node: &geom::Geom,
     cols: &Vec<Col>,
     tb: &mut TreeBuilder,
-    state: &WalkState,
 ) {
-    for (_, edge, child) in forest.child_geoms_iter(nodeid) {
-        let mut addnode = false;
-        let mut newstate = *state;
+    if node.class == GeomClass::LABEL {
+        return;
+    }
 
-        match child.class {
-            GeomClass::PART => {
-                newstate.inpart = true;
-            }
-            GeomClass::LABEL => {
-                newstate.inlabel = true;
-            }
-            GeomClass::DEV => {
-                if state.inpart && !state.inlabel {
-                    addnode = true;
-                }
-            }
-            _ => (),
-        };
+    // Acquire a vec of children, sorted by name.  (Lexographic for now, although it would be nice
+    // to order numbers numerically rather than lexographically eventually.)
+    let mut children: Vec<_> = forest
+        .child_geoms_iter(nodeid)
+        .map(|(_, edge, child)| (edge, child))
+        .collect();
+    children.sort_by_key(|(e1, _)| &e1.name);
+
+    for (edge, child) in children.iter() {
+        let mut addnode = false;
+        if node.class == GeomClass::PART && child.class == GeomClass::DEV {
+            addnode = true;
+        }
 
         if addnode {
             tb.begin_child(
                 cols.iter()
-                    .map(|c| format_datum(edge, child, c))
+                    .map(|c| format_datum(forest, edge, child, c))
                     .collect::<Vec<String>>()
                     .join("\t"),
             );
         }
 
-        walk_geom(forest, &edge.consumer_geom, child, cols, tb, &newstate);
+        walk_geom(forest, &edge.consumer_geom, child, cols, tb);
 
         if addnode {
             tb.end_child();
@@ -121,7 +138,7 @@ fn walk_geom(
 // TODO:
 // 1. Options parsing: [options] [device...]
 fn run() -> Result<()> {
-    let cols = vec![Col::Name, Col::Class, Col::Size];
+    let cols = vec![Col::Name, Col::FsType, Col::Label, Col::Uuid];
 
     let mut tw = TabWriter::new(vec![]);
     emit_header(&mut tw, &cols)?;
@@ -133,10 +150,13 @@ fn run() -> Result<()> {
     };
 
     let forest = geom::get_graph()?;
-    for (nodeid, node) in forest.roots_iter() {
+    // Sort the roots by name.  (Lexographic for now, although human-sort eventually.)
+    let mut roots: Vec<_> = forest.roots_iter().collect();
+    roots.sort_by_key(|(_, g)| &g.name);
+
+    for (nodeid, node) in roots.iter() {
         let mut tb = TreeBuilder::new(format_root(&node.name, cols.len()));
-        let ws: WalkState = Default::default();
-        walk_geom(&forest, nodeid, node, &cols, &mut tb, &ws);
+        walk_geom(&forest, nodeid, node, &cols, &mut tb);
         let tree = tb.build();
         ptree::write_tree_with(&tree, &mut tw, &config)?;
     }
