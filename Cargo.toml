@@ -1,7 +1,7 @@
 [package]
 name = "rsblk"
 description = "List block devices on FreeBSD"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Conrad Meyer <cem@FreeBSD.org>"]
 license = "MIT"
 categories = ["command-line-utilities", "filesystem", "hardware-support", "value-formatting", "visualization"]
@@ -11,8 +11,8 @@ edition = "2018"
 
 [dependencies]
 anyhow = "~1.0.37"
-freebsd-geom = { version = "~0.1.0" }
-ptree = { version = "~0.3.1", features = ["ansi"] }
+freebsd-geom = { version = "~0.1.2" }
+ptree = { version = "~0.3.2", features = ["ansi"] }
 strum = "~0.20.0"
 strum_macros = "~0.20.1"
 tabwriter = { version = "~1.2.1", features = ["ansi_formatting"] }
